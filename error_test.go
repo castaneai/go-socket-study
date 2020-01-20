@@ -9,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestClosingByClient(t *testing.T) {
@@ -79,4 +80,38 @@ func TestClosingByServer(t *testing.T) {
 	}
 }
 
+func TestClosingOnReading(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	nch := make(chan int)
+	errch := make(chan error)
+	go func() {
+		c, err := lis.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			c.Close()
+			log.Printf("closing client on reading...")
+		}()
+		buf := make([]byte, 100)
+		n, err := c.Read(buf);
+		nch <-n
+		errch <-err
+	}()
+
+	c, err := net.Dial("tcp", lis.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 100)
+	n, err := c.Read(buf)
+	assert.Equal(t, 0, <-nch)
+	assert.Contains(t, (<-errch).Error(), "use of closed network connection")
+	assert.Equal(t, 0, n)
+	assert.True(t, errors.Is(err, io.EOF))
+}
